@@ -1,0 +1,45 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24.x'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build plugin
+        run: node build.mjs
+
+      - name: Create zip archive
+        run: zip -r plugin-one-email.zip dist manifest.json
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          tag: ${{ github.ref_name }}
+          body: |
+            ## Changes
+            - Build dist files
+            - Update plugin manifest
+          draft: false
+          prerelease: true
+          allowUpdates: true
+          artifacts: 'plugin-one-email.zip'

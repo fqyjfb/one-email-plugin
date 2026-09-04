@@ -1,0 +1,18 @@
+{
+  "id": "plugin-one-email",
+  "name": "邮箱聚合",
+  "version": "0.1.0",
+  "description": "多邮箱账号聚合管理，支持添加、切换账号，收发、回复、管理邮件",
+  "author": "ToolBox Team",
+  "icon": "Mail",
+  "iconUrl": "https://raw.githubusercontent.com/fqyjfb/toolbox-plugins-registry/main/icons/one-email-plugin/icon.png",
+  "color": "#2563eb",
+  "textColor": "#ffffff",
+  "categories": ["效率", "工具"],
+  "tags": ["email", "mail", "imap", "smtp", "inbox"],
+  "githubRepo": "fqyjfb/one-email-plugin",
+  "entry": "dist/index.js",
+  "isBeta": true,
+  "width": 1280,
+  "height": 800
+}
