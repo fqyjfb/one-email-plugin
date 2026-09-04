@@ -17,8 +17,7 @@
 
 ## 安装
 
-1. 确保 ToolBox 主程序已集成邮箱协议层（`electron/services/emailService.cjs` + `electron/ipc/emailIpc.cjs`，见 `plugins-store/one-email-plugin/设计文档.md` 第 2 章）
-2. 在 ToolBox 插件商店中搜索「邮箱聚合」安装并打开
+1.  在 ToolBox 插件商店中搜索「邮箱聚合」安装并打开
 3. 「＋ 添加账号」→ 选择服务商预设或手动填写 → 测试连接 → 保存
 
 > 国内邮箱（QQ / 163 等）发信需先在邮箱设置中开启 IMAP/SMTP 服务并获取授权码。
