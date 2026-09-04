@@ -28,6 +28,7 @@ function migrateConfig(config: PluginConfig): PluginConfig {
   if (!config.accounts) config.accounts = [];
   if (!config.settings) config.settings = { ...DEFAULT_SETTINGS };
   if (config.settings.pageSize === undefined) config.settings.pageSize = DEFAULT_SETTINGS.pageSize;
+  if (!config.settings.oauthClients) config.settings.oauthClients = {};
   if (config.version !== CONFIG_VERSION) config.version = CONFIG_VERSION;
   return config;
 }

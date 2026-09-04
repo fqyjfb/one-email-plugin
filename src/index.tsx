@@ -133,6 +133,15 @@ function injectTailwindVariables() {
 .one-email-plugin-root ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground));
 }
+
+/* 隐藏滚动条但保留滚动功能（侧栏邮箱列表等） */
+.one-email-plugin-root .no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE / Edge */
+}
+.one-email-plugin-root .no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome / Safari / Electron */
+}
 `;
   document.head.appendChild(style);
 }

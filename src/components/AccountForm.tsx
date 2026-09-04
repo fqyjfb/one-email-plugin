@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Plug, LogIn, X } from 'lucide-react';
-import type { AccountMeta, Credential } from '../types';
+import type { AccountMeta, Credential, OAuthClientConfig, OAuthClientMap } from '../types';
 import type { AccountInput } from '../store/useAccountStore';
 import { PROVIDER_PRESETS, CUSTOM_PRESET_ID, findPreset } from '../constants/presets';
 import * as emailService from '../services/emailService';
@@ -12,6 +12,8 @@ interface AccountFormProps {
   account: AccountMeta | null; // null = 新增
   onClose: () => void;
   onSave: (input: AccountInput, credential: Credential | null) => Promise<void>;
+  /** 全局自有 OAuth 客户端配置（按 provider 存储）；组件内部根据当前预设的 oauthProvider 自动取对应项 */
+  oauthClients?: OAuthClientMap;
 }
 
 const AUTH_TYPES: { value: string; label: string }[] = [
@@ -32,7 +34,13 @@ function detectPreset(account: AccountMeta | null): string {
   return p?.id || CUSTOM_PRESET_ID;
 }
 
-const AccountForm: React.FC<AccountFormProps> = ({ isOpen, account, onClose, onSave }) => {
+const AccountForm: React.FC<AccountFormProps> = ({
+  isOpen,
+  account,
+  onClose,
+  onSave,
+  oauthClients = {},
+}) => {
   const isEdit = !!account;
 
   const [presetId, setPresetId] = useState<string>(CUSTOM_PRESET_ID);
@@ -51,17 +59,27 @@ const AccountForm: React.FC<AccountFormProps> = ({ isOpen, account, onClose, onS
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // OAuth2 浏览器授权流状态
+  // OAuth2 客户端使用模式：
+  //  builtin  → 留空，由主进程使用内置默认客户端
+  //  global   → 使用设置页配置的全局自有客户端（来自 globalOAuthClient prop）
+  //  custom   → 用户在下方手动填写 clientId / clientSecret
+  type OAuthClientMode = 'builtin' | 'global' | 'custom';
+  const [oauthClientMode, setOAuthClientMode] = useState<OAuthClientMode>('builtin');
   const [oauthClientId, setOauthClientId] = useState('');
   const [oauthClientSecret, setOauthClientSecret] = useState('');
   const [oauthLoading, setOauthLoading] = useState(false);
   const [oauthToken, setOauthToken] = useState<OAuthResult | null>(null);
-  const [showOauthAdvanced, setShowOauthAdvanced] = useState(false);
   // 授权流序号：取消 / 重新打开弹窗时递增，令过期的授权结果失效，避免串扰状态
   const oauthSeqRef = useRef(0);
 
   const isOauth = authType === 'oauth';
   const oauthProvider = findPreset(presetId)?.oauthProvider;
+  // 根据当前预设服务商，从全局配置中找到对应 OAuth 客户端
+  const globalOAuthClient: OAuthClientConfig | undefined = useMemo(
+    () => (oauthProvider ? oauthClients[oauthProvider] : undefined),
+    [oauthProvider, oauthClients],
+  );
+  const hasGlobalConfig = !!(globalOAuthClient?.clientId || globalOAuthClient?.clientSecret);
 
   useEffect(() => {
     if (!isOpen) {
@@ -88,8 +106,9 @@ const AccountForm: React.FC<AccountFormProps> = ({ isOpen, account, onClose, onS
     setOauthClientId('');
     setOauthClientSecret('');
     setOauthToken(null);
-    setShowOauthAdvanced(false);
-  }, [isOpen, account]);
+    // 默认模式：有全局配置就优先用全局，否则用内置；后续用户可自行切换
+    setOAuthClientMode(hasGlobalConfig ? 'global' : 'builtin');
+  }, [isOpen, account, hasGlobalConfig]);
 
   const applyPreset = (id: string) => {
     setPresetId(id);
@@ -102,6 +121,13 @@ const AccountForm: React.FC<AccountFormProps> = ({ isOpen, account, onClose, onS
       setSecure(p.secure);
       // 自动切换认证类型：Gmail / Outlook 默认 OAuth2，其余离开 OAuth 时回退到应用专用密码
       setAuthType((prev) => (p.oauthProvider ? 'oauth' : prev === 'oauth' ? 'appPassword' : prev));
+      // 切换到有 OAuthProvider 的预设时，若当前模式是 global 而全局恰好没配置，则回退到 builtin
+      if (p.oauthProvider) {
+        const globalForPreset = p.oauthProvider === 'gmail' || p.oauthProvider === 'outlook'
+          ? hasGlobalConfig
+          : false;
+        setOAuthClientMode(globalForPreset ? 'global' : 'builtin');
+      }
       // 自动补邮箱后缀，减少用户输入（空 → @域名；仅有后缀 → 跟随新预设；仅用户名 → 补 @域名；完整邮箱 → 保留）
       if (p.emailDomain) {
         setEmail((prev) => {
@@ -116,6 +142,26 @@ const AccountForm: React.FC<AccountFormProps> = ({ isOpen, account, onClose, onS
     }
     setOauthToken(null);
   };
+
+  // 根据当前模式，计算实际传给 oauthStart 的 clientId/clientSecret
+  const effectiveOAuthClient = useMemo((): { clientId?: string; clientSecret?: string } => {
+    if (!isOauth || !oauthProvider) return {};
+    switch (oauthClientMode) {
+      case 'global':
+        return {
+          clientId: globalOAuthClient?.clientId || undefined,
+          clientSecret: globalOAuthClient?.clientSecret || undefined,
+        };
+      case 'custom':
+        return {
+          clientId: oauthClientId.trim() || undefined,
+          clientSecret: oauthClientSecret.trim() || undefined,
+        };
+      case 'builtin':
+      default:
+        return {};
+    }
+  }, [oauthClientMode, oauthClientId, oauthClientSecret, globalOAuthClient, isOauth, oauthProvider]);
 
   const buildInput = (): AccountInput => ({
     displayName: displayName.trim() || email.trim(),
@@ -137,8 +183,8 @@ const AccountForm: React.FC<AccountFormProps> = ({ isOpen, account, onClose, onS
           username: oauthToken.username || email.trim(),
           accessToken: oauthToken.accessToken,
           refreshToken: oauthToken.refreshToken || undefined,
-          clientId: oauthToken.clientId,
-          clientSecret: oauthToken.clientSecret,
+          clientId: effectiveOAuthClient.clientId ?? oauthToken.clientId,
+          clientSecret: effectiveOAuthClient.clientSecret ?? oauthToken.clientSecret,
           provider: oauthToken.provider,
           expiresAt: oauthToken.expiresAt,
         };
@@ -180,9 +226,8 @@ const AccountForm: React.FC<AccountFormProps> = ({ isOpen, account, onClose, onS
     try {
       const result = await emailService.oauthStart({
         provider: oauthProvider,
-        // 留空时主进程回退到内置默认客户端；仅在用户填写「高级」自定义 clientId 时传入
-        clientId: oauthClientId.trim() || undefined,
-        clientSecret: oauthClientSecret.trim() || undefined,
+        clientId: effectiveOAuthClient.clientId,
+        clientSecret: effectiveOAuthClient.clientSecret,
         username: email.trim(),
       });
       if (seq !== oauthSeqRef.current) return; // 已被取消或重新发起，丢弃过期结果
@@ -390,39 +435,114 @@ const AccountForm: React.FC<AccountFormProps> = ({ isOpen, account, onClose, onS
                 已在浏览器打开授权页，请完成登录；如需中断请点击上方按钮取消。
               </p>
             )}
-            <button
-              type="button"
-              onClick={() => setShowOauthAdvanced((v) => !v)}
-              disabled={oauthLoading || !!oauthToken}
-              className="text-xs text-muted-foreground underline hover:text-foreground"
-            >
-              {showOauthAdvanced ? '收起自定义设置' : '高级：使用自有 OAuth 客户端（clientId）'}
-            </button>
-            {showOauthAdvanced && (
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>clientId（可选）</label>
+
+            {/* OAuth 客户端使用模式切换 */}
+            <div className="pt-1.5 border-t border-border/60">
+              <div className="text-xs text-muted-foreground mb-2">OAuth 客户端选择</div>
+              <div className="flex flex-wrap gap-2">
+                <label
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md border cursor-pointer transition-colors ${
+                    oauthClientMode === 'builtin'
+                      ? 'bg-accent border-ring'
+                      : 'border-border hover:bg-accent/60'
+                  } ${oauthLoading || !!oauthToken ? 'opacity-60 pointer-events-none' : ''}`}
+                >
                   <input
-                    value={oauthClientId}
-                    onChange={(e) => setOauthClientId(e.target.value)}
-                    className={inputCls}
-                    placeholder="留空使用内置客户端"
+                    type="radio"
+                    checked={oauthClientMode === 'builtin'}
+                    onChange={() => setOAuthClientMode('builtin')}
+                    className="sr-only"
                     disabled={oauthLoading || !!oauthToken}
                   />
-                </div>
-                <div>
-                  <label className={labelCls}>clientSecret（可选）</label>
+                  内置默认客户端
+                </label>
+                <label
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md border cursor-pointer transition-colors ${
+                    oauthClientMode === 'global'
+                      ? 'bg-accent border-ring'
+                      : 'border-border hover:bg-accent/60'
+                  } ${(!hasGlobalConfig || oauthLoading || !!oauthToken) ? 'opacity-50 pointer-events-none' : ''}`}
+                  title={hasGlobalConfig ? '使用在「设置」中配置的全局 OAuth 客户端' : '请先在「设置」中配置全局 OAuth 客户端'}
+                >
                   <input
-                    type="password"
-                    value={oauthClientSecret}
-                    onChange={(e) => setOauthClientSecret(e.target.value)}
-                    className={inputCls}
-                    placeholder="公共客户端可留空"
+                    type="radio"
+                    checked={oauthClientMode === 'global'}
+                    onChange={() => setOAuthClientMode('global')}
+                    className="sr-only"
+                    disabled={!hasGlobalConfig || oauthLoading || !!oauthToken}
+                  />
+                  使用全局自有客户端
+                  {hasGlobalConfig && (
+                    <span className="text-[10px] px-1 rounded bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                      已配置
+                    </span>
+                  )}
+                  {!hasGlobalConfig && (
+                    <span className="text-[10px] px-1 rounded bg-muted text-muted-foreground">未配置</span>
+                  )}
+                </label>
+                <label
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md border cursor-pointer transition-colors ${
+                    oauthClientMode === 'custom'
+                      ? 'bg-accent border-ring'
+                      : 'border-border hover:bg-accent/60'
+                  } ${oauthLoading || !!oauthToken ? 'opacity-60 pointer-events-none' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    checked={oauthClientMode === 'custom'}
+                    onChange={() => setOAuthClientMode('custom')}
+                    className="sr-only"
                     disabled={oauthLoading || !!oauthToken}
                   />
-                </div>
+                  自定义（本次专用）
+                </label>
               </div>
-            )}
+
+              {/* 当前模式说明 */}
+              <div className="mt-2 text-xs text-muted-foreground space-y-1">
+                {oauthClientMode === 'builtin' && (
+                  <p>· 使用插件内置的默认 OAuth 客户端（如有）进行浏览器授权。</p>
+                )}
+                {oauthClientMode === 'global' && hasGlobalConfig && (
+                  <p>
+                    · 使用在「设置」页中配置的{oauthProvider === 'gmail' ? 'Gmail' : 'Outlook'}全局自有客户端。
+                    {globalOAuthClient?.clientId && (
+                      <> 当前 clientId：<code className="px-1 rounded bg-muted">{globalOAuthClient.clientId.slice(0, 8)}…</code></>
+                    )}
+                  </p>
+                )}
+                {oauthClientMode === 'custom' && (
+                  <p>· 手动为本次添加/编辑账号单独指定 clientId/clientSecret，不会影响全局设置。</p>
+                )}
+              </div>
+
+              {oauthClientMode === 'custom' && (
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelCls}>clientId</label>
+                    <input
+                      value={oauthClientId}
+                      onChange={(e) => setOauthClientId(e.target.value)}
+                      className={inputCls}
+                      placeholder="输入 clientId"
+                      disabled={oauthLoading || !!oauthToken}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls}>clientSecret</label>
+                    <input
+                      type="password"
+                      value={oauthClientSecret}
+                      onChange={(e) => setOauthClientSecret(e.target.value)}
+                      className={inputCls}
+                      placeholder="公共客户端可留空"
+                      disabled={oauthLoading || !!oauthToken}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

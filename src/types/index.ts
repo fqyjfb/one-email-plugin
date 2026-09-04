@@ -27,6 +27,10 @@ export interface AccountMeta extends AccountConnection {
   signature?: string;
   createdAt: number;
   updatedAt: number;
+  /** 手动标记颜色（右键菜单设置；CSS 色值，如 #ef4444） */
+  color?: string;
+  /** 分组内拖拽排序权重（新增时默认取 createdAt；缺失时回退 createdAt） */
+  order?: number;
 }
 
 /** 明文凭据（仅内存态，经 IPC 传主进程用后即弃） */
@@ -110,9 +114,19 @@ export interface ComposeMail {
   }[];
 }
 
+/** OAuth 自有客户端配置（按服务商存储） */
+export interface OAuthClientConfig {
+  clientId: string;
+  clientSecret: string;
+}
+
+/** 全局 OAuth 客户端配置映射：provider -> clientId/secret */
+export type OAuthClientMap = Partial<Record<'gmail' | 'outlook', OAuthClientConfig>>;
+
 export interface PluginSettings {
   defaultSignature?: string;
   pageSize: number;
+  oauthClients?: OAuthClientMap;
 }
 
 export interface PluginConfig {

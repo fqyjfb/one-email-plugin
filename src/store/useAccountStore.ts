@@ -2,12 +2,12 @@
 // 参考 favorite-plugin/src/store/useBookmarkStore.ts 的 hook 范式
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { AccountMeta, Credential, PluginConfig, ToastMessage } from '../types';
+import type { AccountMeta, Credential, OAuthClientConfig, OAuthClientMap, PluginConfig, ToastMessage } from '../types';
 import { loadConfig, saveConfig } from '../services/storageService';
 import { generateAccountId } from '../utils/id';
 import { cryptoService } from '../services/cryptoService';
 
-export type AccountInput = Omit<AccountMeta, 'id' | 'credentialEnc' | 'createdAt' | 'updatedAt'>;
+export type AccountInput = Omit<AccountMeta, 'id' | 'credentialEnc' | 'createdAt' | 'updatedAt' | 'color' | 'order'>;
 
 export function useAccountStore() {
   const [config, setConfig] = useState<PluginConfig | null>(null);
@@ -51,6 +51,7 @@ export function useAccountStore() {
         credentialEnc,
         createdAt: now,
         updatedAt: now,
+        order: now,
       };
       await persist({ ...config, accounts: [...config.accounts, account] });
       setCurrentAccountId(account.id);
@@ -96,8 +97,64 @@ export function useAccountStore() {
     return (await cryptoService.decrypt(account.credentialEnc)) as Credential | null;
   }, []);
 
+  /** 拖拽排序：按传入 id 顺序写入 order（组内相对顺序），持久化 */
+  const reorderAccounts = useCallback(
+    async (orderedIds: string[]) => {
+      if (!config) return;
+      const rank = new Map(orderedIds.map((id, i) => [id, i]));
+      const accounts = config.accounts.map((a) =>
+        rank.has(a.id) ? { ...a, order: rank.get(a.id)! } : a,
+      );
+      await persist({ ...config, accounts });
+    },
+    [config, persist],
+  );
+
+  /** 设置 / 清除邮箱标记颜色 */
+  const setAccountColor = useCallback(
+    async (id: string, color: string | null) => {
+      if (!config) return;
+      const target = config.accounts.find((a) => a.id === id);
+      if (!target) return;
+      const next: AccountMeta = { ...target };
+      if (color) next.color = color;
+      else delete next.color;
+      await persist({ ...config, accounts: config.accounts.map((a) => (a.id === id ? next : a)) });
+    },
+    [config, persist],
+  );
+
+  const settings = config?.settings;
+  const oauthClients: OAuthClientMap = settings?.oauthClients || {};
+
+  const setOAuthClient = useCallback(
+    async (provider: 'gmail' | 'outlook', cfg: OAuthClientConfig | null) => {
+      if (!config) return;
+      const next: OAuthClientMap = { ...(config.settings.oauthClients || {}) };
+      if (cfg && (cfg.clientId.trim() || cfg.clientSecret.trim())) {
+        next[provider] = { clientId: cfg.clientId.trim(), clientSecret: cfg.clientSecret.trim() };
+      } else {
+        delete next[provider];
+      }
+      await persist({
+        ...config,
+        settings: { ...config.settings, oauthClients: next },
+      });
+      addToast('OAuth 客户端配置已更新', 'success');
+    },
+    [config, persist, addToast],
+  );
+
+  const getOAuthClient = useCallback(
+    (provider: 'gmail' | 'outlook'): OAuthClientConfig | undefined => {
+      return oauthClients[provider];
+    },
+    [oauthClients],
+  );
+
   return {
     config,
+    settings,
     accounts,
     currentAccountId,
     setCurrentAccountId,
@@ -105,6 +162,11 @@ export function useAccountStore() {
     updateAccount,
     deleteAccount,
     decryptCredential,
+    reorderAccounts,
+    setAccountColor,
+    oauthClients,
+    setOAuthClient,
+    getOAuthClient,
     toasts,
     addToast,
   };
