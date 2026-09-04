@@ -1,9 +1,21 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Pencil, Trash2, Mail, FileText, Inbox, Copy, Palette, ChevronDown, ChevronRight } from 'lucide-react';
+import { Mail, FileText, Inbox, ChevronDown, ChevronRight, FolderPlus, EyeOff } from 'lucide-react';
 import type { AccountMeta, Folder as FolderMeta } from '../types';
 import { folderDisplayName, folderIcon } from '../utils/folderIcon';
-import { groupAccountsByProvider, MARK_COLORS } from '../utils/accountType';
+import { groupAccountsByProvider } from '../utils/accountType';
+import { buildFolderTree, flattenFolderTree, type FolderNode } from '../utils/folderTree';
 import { UNIFIED_ID } from '../store/useUnifiedStore';
+import { AccountMenuContent, FolderMenuContent } from './SidebarMenu';
+
+/** 文件夹管理动作（新建 / 重命名 / 全部已读 / 清空 / 订阅切换 / 删除） */
+export interface FolderActions {
+  create: (parent: string | null) => void;
+  rename: (folder: FolderMeta) => void;
+  markSeen: (folder: FolderMeta) => void;
+  empty: (folder: FolderMeta) => void;
+  toggleSubscribe: (folder: FolderMeta) => void;
+  remove: (folder: FolderMeta) => void;
+}
 
 interface SidebarProps {
   accounts: AccountMeta[];
@@ -18,6 +30,8 @@ interface SidebarProps {
   onEditAccount: (account: AccountMeta) => void;
   onDeleteAccount: (account: AccountMeta) => void;
   onOpenDrafts: () => void;
+  /** 文件夹右键菜单动作集合 */
+  folderActions: FolderActions;
   /** 右键菜单中点击「复制邮箱」回调 */
   onCopyEmail?: (email: string) => void;
   /** 拖拽排序回调（传入该分组内新的账号 id 顺序） */
@@ -30,19 +44,23 @@ function initialOf(name: string): string {
   return (name || '?').trim().charAt(0).toUpperCase();
 }
 
-interface ContextMenuState {
-  x: number; // 容器内坐标（相对 Sidebar）
-  y: number;
-  account: AccountMeta;
-}
+type ContextMenuState =
+  | { kind: 'account'; x: number; y: number; account: AccountMeta }
+  | { kind: 'folder'; x: number; y: number; folder: FolderMeta };
+
+/** 去掉坐标字段后的菜单目标（Omit 对联合类型需逐支分发） */
+type MenuTarget =
+  | { kind: 'account'; account: AccountMeta }
+  | { kind: 'folder'; folder: FolderMeta };
 
 interface DragState {
   id: string;
   group: string;
 }
 
-const MENU_MIN_WIDTH = 140;
-const MENU_GAP = 4; // 距视口边距
+const MENU_MIN_WIDTH = 160;
+const MENU_GAP = 4; // 距容器边距
+const FOLDER_INDENT = 12; // 每层缩进（px）
 
 const Sidebar: React.FC<SidebarProps> = ({
   accounts,
@@ -57,11 +75,11 @@ const Sidebar: React.FC<SidebarProps> = ({
   onEditAccount,
   onDeleteAccount,
   onOpenDrafts,
+  folderActions,
   onCopyEmail,
   onReorderAccounts,
   onSetAccountColor,
 }) => {
-  const currentAccount = accounts.find((a) => a.id === currentAccountId) || null;
   const unifiedActive = currentAccountId === UNIFIED_ID;
   const unifiedUnread = accounts.reduce((sum, acc) => sum + (unread[acc.id] ?? 0), 0);
 
@@ -73,6 +91,25 @@ const Sidebar: React.FC<SidebarProps> = ({
   const toggleGroup = useCallback((key: string) => {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
+
+  // 文件夹层级树（IMAP list() 为扁平路径，按分隔符还原）
+  const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+  const [folderCollapsed, setFolderCollapsed] = useState<Record<string, boolean>>({});
+  const folderRows = useMemo(() => flattenFolderTree(folderTree, folderCollapsed), [folderTree, folderCollapsed]);
+  // 含子文件夹的父路径集合：这类文件夹禁止直接删除
+  const parentPaths = useMemo(() => {
+    const set = new Set<string>();
+    const walk = (nodes: FolderNode[]) => {
+      for (const n of nodes) {
+        if (n.children.length > 0) {
+          set.add(n.folder.path);
+          walk(n.children);
+        }
+      }
+    };
+    walk(folderTree);
+    return set;
+  }, [folderTree]);
 
   // 拖拽状态
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -93,17 +130,15 @@ const Sidebar: React.FC<SidebarProps> = ({
     setColorPickerOpen(false);
   }, []);
 
-  // 邮件行右键打开菜单
-  const handleContextMenu = useCallback((e: React.MouseEvent, account: AccountMeta) => {
+  // 右键打开菜单（坐标统一换算为 Sidebar 内相对坐标）
+  const openMenuAt = useCallback((e: React.MouseEvent, target: MenuTarget) => {
     e.preventDefault();
     e.stopPropagation();
     const host = sidebarRef.current;
     if (!host) return;
     const hostRect = host.getBoundingClientRect();
-    const x = e.clientX - hostRect.left;
-    const y = e.clientY - hostRect.top;
     setColorPickerOpen(false);
-    setMenu({ x, y, account });
+    setMenu({ ...target, x: e.clientX - hostRect.left, y: e.clientY - hostRect.top });
     setRenderPos(null); // 下次 useLayoutEffect 根据菜单尺寸重算
   }, []);
 
@@ -201,9 +236,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     };
   }, [menu, closeMenu]);
 
-  // 从 menu 状态中取当前操作的 account（避免二次查找）
-  const activeCtx = menu?.account || null;
-
   return (
     <aside ref={sidebarRef} className="relative w-[220px] shrink-0 flex flex-col border-r border-border bg-background">
       {/* 精简头部：标题 + 数量 */}
@@ -274,7 +306,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <div
                         draggable
                         onClick={() => onSelectAccount(acc.id)}
-                        onContextMenu={(e) => handleContextMenu(e, acc)}
+                        onContextMenu={(e) => openMenuAt(e, { kind: 'account', account: acc })}
                         onDragStart={(e) => handleDragStart(e, acc, group.key)}
                         onDragEnd={handleDragEnd}
                         onDragOver={handleDragOver}
@@ -305,23 +337,71 @@ const Sidebar: React.FC<SidebarProps> = ({
                         )}
                       </div>
 
-                      {/* 当前账号的文件夹树 */}
+                      {/* 当前账号的文件夹树（右键可管理） */}
                       {active && !unifiedActive && (
-                        <div className="pl-9 pr-2 pb-1">
-                          {folders.map((f) => (
+                        <div className="pl-6 pr-2 pb-1">
+                          <div className="flex items-center gap-1 py-1 pr-1">
+                            <span className="flex-1 text-xs text-muted-foreground">文件夹</span>
                             <button
-                              key={f.path}
-                              onClick={() => onSwitchFolder(f.path)}
-                              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors ${
-                                f.path === currentFolder
-                                  ? 'bg-accent text-foreground'
-                                  : 'text-muted-foreground hover:bg-accent/60'
-                              }`}
+                              type="button"
+                              title="新建文件夹"
+                              onClick={() => folderActions.create(null)}
+                              className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
                             >
-                              {folderIcon(f)}
-                              <span className="truncate" title={f.path}>{folderDisplayName(f)}</span>
+                              <FolderPlus className="w-3.5 h-3.5" />
                             </button>
-                          ))}
+                          </div>
+
+                          {folderRows.length === 0 && (
+                            <div className="py-1 text-xs text-muted-foreground">暂无文件夹</div>
+                          )}
+
+                          {folderRows.map((node) => {
+                            const f = node.folder;
+                            const isOpen = !folderCollapsed[f.path];
+                            return (
+                              <div
+                                key={f.path}
+                                onClick={() => onSwitchFolder(f.path)}
+                                onContextMenu={(e) => openMenuAt(e, { kind: 'folder', folder: f })}
+                                title={f.path}
+                                style={{ paddingLeft: node.depth * FOLDER_INDENT }}
+                                className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-sm cursor-pointer transition-colors ${
+                                  f.path === currentFolder
+                                    ? 'bg-accent text-foreground'
+                                    : 'text-muted-foreground hover:bg-accent/60'
+                                }`}
+                              >
+                                {node.children.length > 0 ? (
+                                  <span
+                                    role="button"
+                                    tabIndex={-1}
+                                    title={isOpen ? '折叠' : '展开'}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setFolderCollapsed((prev) => ({ ...prev, [f.path]: isOpen }));
+                                    }}
+                                    className="shrink-0 p-0.5 rounded hover:bg-accent"
+                                  >
+                                    {isOpen ? (
+                                      <ChevronDown className="w-3 h-3" />
+                                    ) : (
+                                      <ChevronRight className="w-3 h-3" />
+                                    )}
+                                  </span>
+                                ) : (
+                                  <span className="w-4 shrink-0" />
+                                )}
+                                {folderIcon(f)}
+                                <span className="flex-1 min-w-0 truncate">{folderDisplayName(f)}</span>
+                                {!f.subscribed && (
+                                  <span title="未订阅" className="shrink-0 flex opacity-60">
+                                    <EyeOff className="w-3 h-3" />
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -345,11 +425,11 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* 右键上下文菜单 */}
-      {menu && activeCtx && (
+      {/* 右键上下文菜单（账号 / 文件夹） */}
+      {menu && (
         <div
           ref={menuRef}
-          data-context-menu="sidebar-account"
+          data-context-menu={`sidebar-${menu.kind}`}
           style={{
             left: renderPos ? renderPos.left : menu.x,
             top: renderPos ? renderPos.top : menu.y,
@@ -359,105 +439,31 @@ const Sidebar: React.FC<SidebarProps> = ({
           }}
           className="absolute z-40 py-1 rounded-md border border-border bg-white dark:bg-gray-800 text-sm shadow-md"
         >
-          {onCopyEmail && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                closeMenu();
-                onCopyEmail(activeCtx.email);
-              }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent transition-colors text-left"
-              title={activeCtx.email}
-            >
-              <Copy className="w-3.5 h-3.5" />
-              复制邮箱
-            </button>
+          {menu.kind === 'account' ? (
+            <AccountMenuContent
+              account={menu.account}
+              colorPickerOpen={colorPickerOpen}
+              onToggleColorPicker={() => setColorPickerOpen((v) => !v)}
+              onClose={closeMenu}
+              onCopyEmail={onCopyEmail}
+              onAddAccount={onAddAccount}
+              onEditAccount={onEditAccount}
+              onDeleteAccount={onDeleteAccount}
+              onSetAccountColor={onSetAccountColor}
+            />
+          ) : (
+            <FolderMenuContent
+              folder={menu.folder}
+              hasChildren={parentPaths.has(menu.folder.path)}
+              onClose={closeMenu}
+              onNewSubFolder={folderActions.create}
+              onRename={folderActions.rename}
+              onMarkAllSeen={folderActions.markSeen}
+              onEmpty={folderActions.empty}
+              onToggleSubscribe={folderActions.toggleSubscribe}
+              onDelete={folderActions.remove}
+            />
           )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              closeMenu();
-              onAddAccount();
-            }}
-            className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent transition-colors text-left"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            添加邮箱
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              closeMenu();
-              onEditAccount(activeCtx);
-            }}
-            className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent transition-colors text-left"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-            编辑
-          </button>
-
-          {/* 标记颜色子菜单 */}
-          {onSetAccountColor && (
-            <>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setColorPickerOpen((v) => !v);
-                }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent transition-colors text-left"
-              >
-                <Palette className="w-3.5 h-3.5" />
-                标记颜色
-                <ChevronRight
-                  className={`w-3.5 h-3.5 ml-auto transition-transform ${colorPickerOpen ? 'rotate-90' : ''}`}
-                />
-              </button>
-              {colorPickerOpen && (
-                <div className="px-2 pb-1.5 pt-0.5 border-t border-border/60">
-                  <div className="grid grid-cols-4 gap-1.5 py-1.5">
-                    {MARK_COLORS.map((c) => (
-                      <button
-                        key={c.value}
-                        title={c.label}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          closeMenu();
-                          onSetAccountColor(activeCtx.id, c.value);
-                        }}
-                        className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
-                          activeCtx.color === c.value ? 'border-foreground' : 'border-transparent'
-                        }`}
-                        style={{ backgroundColor: c.value }}
-                      />
-                    ))}
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      closeMenu();
-                      onSetAccountColor(activeCtx.id, null);
-                    }}
-                    className="w-full text-xs text-muted-foreground hover:bg-accent rounded px-2 py-1 text-left transition-colors"
-                  >
-                    清除标记
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-
-          <div className="my-0.5 border-t border-border/60" />
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              closeMenu();
-              onDeleteAccount(activeCtx);
-            }}
-            className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent transition-colors text-left text-destructive"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            删除
-          </button>
         </div>
       )}
     </aside>

@@ -92,6 +92,8 @@ export interface MailDetail {
 /** IMAP 文件夹 */
 export interface Folder {
   path: string;
+  /** 服务端层级分隔符（用于还原父子层级、拼接子路径） */
+  delimiter?: string;
   specialUse: string | null; // \Sent \Trash \Drafts 等
   subscribed: boolean;
 }

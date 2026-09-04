@@ -42,6 +42,82 @@ export async function listFolders(account: AccountConnection, credential: Creden
   return (res.data || []) as Folder[];
 }
 
+// —— 文件夹管理（新建 / 重命名 / 删除 / 订阅 / 清空 / 全部已读）——
+// 变更类操作统一回传最新文件夹列表，省去前端二次 listFolders 往返
+
+/** 新建文件夹；parent 为 null 时建在根层级 */
+export async function createFolder(
+  account: AccountConnection,
+  credential: Credential,
+  parent: string | null,
+  name: string,
+): Promise<Folder[]> {
+  assertAvailable();
+  const res = await api.createFolder({ imap: toImap(account), credential, parent, name });
+  if (!res?.ok) throw new Error(res?.error || '新建文件夹失败');
+  return (res.data || []) as Folder[];
+}
+
+/** 重命名文件夹（仅改末级名称）；返回最新列表与该文件夹的新完整路径 */
+export async function renameFolder(
+  account: AccountConnection,
+  credential: Credential,
+  path: string,
+  name: string,
+): Promise<{ folders: Folder[]; path: string }> {
+  assertAvailable();
+  const res = await api.renameFolder({ imap: toImap(account), credential, path, name });
+  if (!res?.ok) throw new Error(res?.error || '重命名失败');
+  return res.data as { folders: Folder[]; path: string };
+}
+
+/** 删除文件夹 */
+export async function deleteFolder(
+  account: AccountConnection,
+  credential: Credential,
+  path: string,
+): Promise<Folder[]> {
+  assertAvailable();
+  const res = await api.deleteFolder({ imap: toImap(account), credential, path });
+  if (!res?.ok) throw new Error(res?.error || '删除文件夹失败');
+  return (res.data || []) as Folder[];
+}
+
+/** 订阅 / 取消订阅（控制文件夹是否在侧栏展示） */
+export async function setFolderSubscribed(
+  account: AccountConnection,
+  credential: Credential,
+  path: string,
+  subscribed: boolean,
+): Promise<Folder[]> {
+  assertAvailable();
+  const res = await api.setFolderSubscribed({ imap: toImap(account), credential, path, subscribed });
+  if (!res?.ok) throw new Error(res?.error || (subscribed ? '订阅失败' : '取消订阅失败'));
+  return (res.data || []) as Folder[];
+}
+
+/** 清空文件夹内全部邮件 */
+export async function emptyFolder(
+  account: AccountConnection,
+  credential: Credential,
+  path: string,
+): Promise<void> {
+  assertAvailable();
+  const res = await api.emptyFolder({ imap: toImap(account), credential, path });
+  if (!res?.ok) throw new Error(res?.error || '清空文件夹失败');
+}
+
+/** 文件夹内全部标记为已读 */
+export async function markFolderSeen(
+  account: AccountConnection,
+  credential: Credential,
+  path: string,
+): Promise<void> {
+  assertAvailable();
+  const res = await api.markFolderSeen({ imap: toImap(account), credential, path });
+  if (!res?.ok) throw new Error(res?.error || '标记已读失败');
+}
+
 export async function listMessages(
   account: AccountConnection,
   credential: Credential,

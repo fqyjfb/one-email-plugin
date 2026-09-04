@@ -4,6 +4,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { AccountMeta, Credential, Folder, MailMeta, MailDetail } from '../types';
 import * as emailService from '../services/emailService';
+import { DEFAULT_DELIMITER, isSameOrSubPath } from '../utils/folderTree';
 
 const INBOX = 'INBOX';
 const PAGE_SIZE = 50;
@@ -159,6 +160,117 @@ export function useMailStore(
     else void loadMessages(currentFolder, true);
   }, [searchQuery, doSearch, loadMessages, currentFolder]);
 
+  // —— 文件夹管理 ——
+  // 统一约定：成功返回 null，失败返回错误文案（由调用方弹 toast）
+
+  const createFolder = useCallback(
+    async (parent: string | null, name: string): Promise<string | null> => {
+      if (!account || !credential) return '请先选择账号';
+      setError(null);
+      try {
+        setFolders(await emailService.createFolder(account, credential, parent, name));
+        return null;
+      } catch (e) {
+        const msg = (e as Error).message;
+        setError(msg);
+        return msg;
+      }
+    },
+    [account, credential],
+  );
+
+  const renameFolder = useCallback(
+    async (path: string, name: string): Promise<string | null> => {
+      if (!account || !credential) return '请先选择账号';
+      setError(null);
+      try {
+        const res = await emailService.renameFolder(account, credential, path, name);
+        setFolders(res.folders);
+        const delim = res.folders.find((f) => f.delimiter)?.delimiter || DEFAULT_DELIMITER;
+        // 当前文件夹位于被重命名子树内 → 跟随切到新路径
+        if (isSameOrSubPath(currentFolder, path, delim)) {
+          switchFolder(currentFolder === path ? res.path : res.path + currentFolder.slice(path.length));
+        }
+        return null;
+      } catch (e) {
+        const msg = (e as Error).message;
+        setError(msg);
+        return msg;
+      }
+    },
+    [account, credential, currentFolder, switchFolder],
+  );
+
+  const deleteFolder = useCallback(
+    async (path: string): Promise<string | null> => {
+      if (!account || !credential) return '请先选择账号';
+      setError(null);
+      try {
+        const list = await emailService.deleteFolder(account, credential, path);
+        setFolders(list);
+        const delim = list.find((f) => f.delimiter)?.delimiter || DEFAULT_DELIMITER;
+        // 当前文件夹被删、或其所属父级被删 → 回退到收件箱
+        if (isSameOrSubPath(currentFolder, path, delim)) switchFolder(INBOX);
+        return null;
+      } catch (e) {
+        const msg = (e as Error).message;
+        setError(msg);
+        return msg;
+      }
+    },
+    [account, credential, currentFolder, switchFolder],
+  );
+
+  const setFolderSubscribed = useCallback(
+    async (path: string, subscribed: boolean): Promise<string | null> => {
+      if (!account || !credential) return '请先选择账号';
+      setError(null);
+      try {
+        setFolders(await emailService.setFolderSubscribed(account, credential, path, subscribed));
+        return null;
+      } catch (e) {
+        const msg = (e as Error).message;
+        setError(msg);
+        return msg;
+      }
+    },
+    [account, credential],
+  );
+
+  const emptyFolder = useCallback(
+    async (path: string): Promise<string | null> => {
+      if (!account || !credential) return '请先选择账号';
+      setError(null);
+      try {
+        await emailService.emptyFolder(account, credential, path);
+        if (path === currentFolder) refreshList();
+        return null;
+      } catch (e) {
+        const msg = (e as Error).message;
+        setError(msg);
+        return msg;
+      }
+    },
+    [account, credential, currentFolder, refreshList],
+  );
+
+  const markFolderSeen = useCallback(
+    async (path: string): Promise<string | null> => {
+      if (!account || !credential) return '请先选择账号';
+      setError(null);
+      try {
+        await emailService.markFolderSeen(account, credential, path);
+        if (path === currentFolder) refreshList();
+        return null;
+      } catch (e) {
+        const msg = (e as Error).message;
+        setError(msg);
+        return msg;
+      }
+    },
+    [account, credential, currentFolder, refreshList],
+  );
+
   const openMail = useCallback(
     async (meta: MailMeta) => {
       if (!account || !credential) return;
@@ -269,6 +381,12 @@ export function useMailStore(
     loadMore,
     refreshList,
     runSearch,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    setFolderSubscribed,
+    emptyFolder,
+    markFolderSeen,
     openMail,
     markSeen,
     deleteMails,

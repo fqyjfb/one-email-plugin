@@ -1,5 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { AccountMeta, AttachmentMeta, Credential, Draft, MailDetail, MailMeta } from './types';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  AccountMeta,
+  AttachmentMeta,
+  Credential,
+  Draft,
+  Folder,
+  MailDetail,
+  MailMeta,
+} from './types';
 import { useAccountStore, AccountInput } from './store/useAccountStore';
 import { useMailStore } from './store/useMailStore';
 import { useUnifiedStore, UNIFIED_ID } from './store/useUnifiedStore';
@@ -7,13 +15,15 @@ import { useUnreadStore } from './store/useUnreadStore';
 import * as emailService from './services/emailService';
 import * as draftService from './services/draftService';
 import Header from './components/Header';
-import Sidebar from './components/Sidebar';
+import Sidebar, { type FolderActions } from './components/Sidebar';
 import AccountForm from './components/AccountForm';
+import FolderNameModal from './components/FolderNameModal';
 import MailList, { MailFilter } from './components/MailList';
 import MailReader from './components/MailReader';
 import Compose, { ComposeMode } from './components/Compose';
 import Modal from './components/Modal';
 import Toast from './components/Toast';
+import { folderDisplayName } from './utils/folderIcon';
 import MoveFolderModal from './components/MoveFolderModal';
 import DraftsModal from './components/DraftsModal';
 import SettingsModal from './components/SettingsModal';
@@ -66,6 +76,15 @@ const ToolPanel: React.FC = () => {
   // 草稿箱
   const [showDrafts, setShowDrafts] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
+
+  // 文件夹管理：新建 / 重命名弹窗（folder 为 null 表示新建）与危险操作确认弹窗
+  const [folderForm, setFolderForm] = useState<{ folder: Folder | null; parentPath: string | null } | null>(null);
+  const [folderConfirm, setFolderConfirm] = useState<{
+    title: string;
+    message: string;
+    confirmText: string;
+    run: () => Promise<void>;
+  } | null>(null);
 
   // 账号切换时同步重置凭据（render-phase reset），避免旧账号凭据串扰新账号
   const [prevAccountId, setPrevAccountId] = useState<string | null>(currentAccountId);
@@ -435,6 +454,78 @@ const ToolPanel: React.FC = () => {
     [addToast],
   );
 
+  // —— 文件夹管理（侧栏「+」按钮与文件夹右键菜单） ——
+
+  /** 统一执行文件夹操作：成功提示、失败报错，按需重算未读角标 */
+  const runFolderAction = useCallback(
+    async (action: () => Promise<string | null>, okMessage: string, needsUnreadRefresh: boolean) => {
+      const err = await action();
+      if (err) {
+        addToast(err, 'error');
+        return;
+      }
+      addToast(okMessage, 'success');
+      if (needsUnreadRefresh) void refreshUnread();
+    },
+    [addToast, refreshUnread],
+  );
+
+  const folderActions: FolderActions = useMemo(
+    () => ({
+      create: (parent) => setFolderForm({ folder: null, parentPath: parent }),
+      rename: (folder) => setFolderForm({ folder, parentPath: null }),
+      markSeen: (folder) => {
+        const label = folderDisplayName(folder);
+        void runFolderAction(() => mailStore.markFolderSeen(folder.path), `已全部标为已读：${label}`, true);
+      },
+      empty: (folder) => {
+        setFolderConfirm({
+          title: '清空文件夹',
+          message: `确认清空「${folderDisplayName(folder)}」内的全部邮件？该操作不可撤销。`,
+          confirmText: '清空',
+          run: () => runFolderAction(() => mailStore.emptyFolder(folder.path), '文件夹已清空', true),
+        });
+      },
+      toggleSubscribe: (folder) => {
+        const next = !folder.subscribed;
+        void runFolderAction(
+          () => mailStore.setFolderSubscribed(folder.path, next),
+          next ? '已订阅该文件夹' : '已取消订阅',
+          false,
+        );
+      },
+      remove: (folder) => {
+        setFolderConfirm({
+          title: '删除文件夹',
+          message: `确认删除文件夹「${folderDisplayName(folder)}」？服务器上该文件夹将被移除。`,
+          confirmText: '删除',
+          run: () => runFolderAction(() => mailStore.deleteFolder(folder.path), '文件夹已删除', true),
+        });
+      },
+    }),
+    [runFolderAction, mailStore],
+  );
+
+  // 新建 / 重命名提交：返回错误文案时保留弹窗
+  const handleFolderFormSubmit = useCallback(
+    async (name: string): Promise<string | null> => {
+      if (!folderForm) return null;
+      const target = folderForm.folder;
+      const err = target
+        ? await mailStore.renameFolder(target.path, name)
+        : await mailStore.createFolder(folderForm.parentPath, name);
+      if (!err) addToast(target ? '文件夹已重命名' : '文件夹已创建', 'success');
+      return err;
+    },
+    [folderForm, mailStore, addToast],
+  );
+
+  const handleFolderConfirm = useCallback(() => {
+    const run = folderConfirm?.run;
+    setFolderConfirm(null);
+    if (run) void run();
+  }, [folderConfirm]);
+
   return (
     <div className="one-email-plugin-root flex flex-col h-full min-h-0 w-full bg-background text-foreground">
       {/* 固定位置的头部区域 */}
@@ -463,6 +554,7 @@ const ToolPanel: React.FC = () => {
           onEditAccount={openEditAccount}
           onDeleteAccount={setDeleteAccountTarget}
           onOpenDrafts={openDrafts}
+          folderActions={folderActions}
           onCopyEmail={handleCopyEmail}
           onReorderAccounts={reorderAccounts}
           onSetAccountColor={setAccountColor}
@@ -595,6 +687,28 @@ const ToolPanel: React.FC = () => {
         onClose={() => setMoveUids(null)}
         onPick={handlePickFolder}
       />
+
+      {/* 文件夹新建 / 重命名 */}
+      <FolderNameModal
+        isOpen={folderForm !== null}
+        folder={folderForm?.folder ?? null}
+        parentPath={folderForm?.parentPath ?? null}
+        onClose={() => setFolderForm(null)}
+        onSubmit={handleFolderFormSubmit}
+      />
+
+      {/* 文件夹危险操作（清空 / 删除）二次确认 */}
+      <Modal
+        isOpen={folderConfirm !== null}
+        onClose={() => setFolderConfirm(null)}
+        title={folderConfirm?.title ?? ''}
+        confirmText={folderConfirm?.confirmText ?? '确认'}
+        cancelText="取消"
+        onConfirm={handleFolderConfirm}
+        onCancel={() => setFolderConfirm(null)}
+      >
+        <p className="text-sm text-gray-600 dark:text-gray-300">{folderConfirm?.message}</p>
+      </Modal>
 
       <DraftsModal
         isOpen={showDrafts}
