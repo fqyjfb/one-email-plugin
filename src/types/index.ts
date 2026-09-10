@@ -149,6 +149,8 @@ export interface Draft {
   accountId: string;
   to: string;
   cc: string;
+  /** 密送：历史草稿无此字段（兼容：读取时 d.bcc || ''） */
+  bcc?: string;
   subject: string;
   bodyHtml: string;
   updatedAt: number;

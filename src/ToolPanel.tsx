@@ -18,7 +18,8 @@ import Header from './components/Header';
 import Sidebar, { type FolderActions } from './components/Sidebar';
 import AccountForm from './components/AccountForm';
 import FolderNameModal from './components/FolderNameModal';
-import MailList, { MailFilter } from './components/MailList';
+import MailList from './components/MailList';
+import { applyMailFilter, type MailFilter } from './utils/mailFilter';
 import MailReader from './components/MailReader';
 import Compose, { ComposeMode } from './components/Compose';
 import Modal from './components/Modal';
@@ -27,6 +28,7 @@ import { folderDisplayName } from './utils/folderIcon';
 import MoveFolderModal from './components/MoveFolderModal';
 import DraftsModal from './components/DraftsModal';
 import SettingsModal from './components/SettingsModal';
+import { useResizableWidths } from './hooks/useResizableWidths';
 
 type ComposeState = {
   mode: ComposeMode;
@@ -93,6 +95,10 @@ const ToolPanel: React.FC = () => {
     setCredential(null);
   }
 
+  // 左右两栏宽度（鼠标拖拽控制 + localStorage 持久化，参考 file-manager-plugin 实现）
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { widths, startDrag } = useResizableWidths(containerRef);
+
   // IDLE 新邮件回调（经 ref 读取最新视图状态）
   const isUnifiedRef = useRef(isUnified);
   isUnifiedRef.current = isUnified;
@@ -151,6 +157,37 @@ const ToolPanel: React.FC = () => {
   const activeDetail = isUnified ? unifiedStore.selectedDetail : mailStore.selectedDetail;
   const activeLoadingDetail = isUnified ? unifiedStore.loadingDetail : mailStore.loadingDetail;
   const activeError = isUnified ? unifiedStore.error : mailStore.error;
+
+  // A3 列表过滤口径与 MailList 严格一致，确保「上/下一封」不串序
+  const isSearching = activeSearchQuery.trim().length > 0;
+  const visibleMessages = useMemo(
+    () => applyMailFilter(activeMessages, mailFilter, isSearching),
+    [activeMessages, mailFilter, isSearching],
+  );
+  const detailIndex = activeDetail
+    ? visibleMessages.findIndex(
+        (m) =>
+          m.uid === activeDetail.uid &&
+          (!isUnified || m.accountId === activeDetail.accountId),
+      )
+    : -1;
+  const openDetail = useCallback(
+    (m: MailMeta) => {
+      if (isUnified) void unifiedStore.openMail(m);
+      else void mailStore.openMail(m);
+    },
+    [isUnified, unifiedStore, mailStore],
+  );
+  const goPrev = useCallback(() => {
+    if (detailIndex > 0) openDetail(visibleMessages[detailIndex - 1]);
+  }, [detailIndex, visibleMessages, openDetail]);
+  const goNext = useCallback(() => {
+    if (detailIndex >= 0 && detailIndex < visibleMessages.length - 1) {
+      openDetail(visibleMessages[detailIndex + 1]);
+    }
+  }, [detailIndex, visibleMessages, openDetail]);
+  const hasPrev = detailIndex > 0;
+  const hasNext = detailIndex >= 0 && detailIndex < visibleMessages.length - 1;
 
   const openAddAccount = useCallback(() => {
     setEditingAccount(null);
@@ -539,8 +576,8 @@ const ToolPanel: React.FC = () => {
         searching={activeSearching}
       />
 
-      {/* 下方三栏布局 */}
-      <div className="flex-1 flex min-h-0 min-w-0">
+      {/* 下方三栏布局（左右宽度可拖拽，自动持久化） */}
+      <div ref={containerRef} className="flex-1 flex min-h-0 min-w-0">
         <Sidebar
           accounts={accounts}
           currentAccountId={currentAccountId}
@@ -558,7 +595,17 @@ const ToolPanel: React.FC = () => {
           onCopyEmail={handleCopyEmail}
           onReorderAccounts={reorderAccounts}
           onSetAccountColor={setAccountColor}
+          width={widths.sidebar}
         />
+
+        {/* 侧栏 / 邮件列表 之间的拖拽手柄 */}
+        <div
+          className="w-1 shrink-0 cursor-col-resize hover:bg-accent transition-colors flex items-center justify-center"
+          onMouseDown={startDrag('sidebar')}
+          title="拖动调整侧栏宽度"
+        >
+          <div className="w-0.5 h-8 bg-border rounded-full" />
+        </div>
 
         <MailList
           messages={activeMessages}
@@ -590,7 +637,17 @@ const ToolPanel: React.FC = () => {
           onBatchDelete={handleBatchDelete}
           onBatchMove={handleBatchMove}
           onMarkSeen={handleSingleMarkSeen}
+          width={widths.maillist}
         />
+
+        {/* 邮件列表 / 阅读区 之间的拖拽手柄 */}
+        <div
+          className="w-1 shrink-0 cursor-col-resize hover:bg-accent transition-colors flex items-center justify-center"
+          onMouseDown={startDrag('maillist')}
+          title="拖动调整列表宽度"
+        >
+          <div className="w-0.5 h-8 bg-border rounded-full" />
+        </div>
 
         <div className="flex-1 flex flex-col min-w-0 border-l border-border">
           {activeError && (
@@ -645,6 +702,10 @@ const ToolPanel: React.FC = () => {
                 handleMoveDetail(d);
               }}
               onDownloadAttachment={handleDownloadAttachment}
+              onPrev={goPrev}
+              onNext={goNext}
+              hasPrev={hasPrev}
+              hasNext={hasNext}
             />
           )}
         </div>

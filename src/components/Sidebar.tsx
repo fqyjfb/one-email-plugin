@@ -38,6 +38,8 @@ interface SidebarProps {
   onReorderAccounts?: (orderedIds: string[]) => void;
   /** 标记颜色回调（color 为 null 表示清除标记） */
   onSetAccountColor?: (id: string, color: string | null) => void;
+  /** 面板宽度（受外层拖拽控制），不传时回退默认 220px */
+  width?: number;
 }
 
 function initialOf(name: string): string {
@@ -79,6 +81,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onCopyEmail,
   onReorderAccounts,
   onSetAccountColor,
+  width,
 }) => {
   const unifiedActive = currentAccountId === UNIFIED_ID;
   const unifiedUnread = accounts.reduce((sum, acc) => sum + (unread[acc.id] ?? 0), 0);
@@ -237,7 +240,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   }, [menu, closeMenu]);
 
   return (
-    <aside ref={sidebarRef} className="relative w-[220px] shrink-0 flex flex-col border-r border-border bg-background">
+    <aside ref={sidebarRef} style={width ? { width } : undefined} className="relative shrink-0 flex flex-col border-r border-border bg-background">
       {/* 精简头部：标题 + 数量 */}
       <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
         <span className="text-xs font-medium text-muted-foreground">邮箱账号</span>

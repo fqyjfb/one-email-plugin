@@ -14,8 +14,8 @@ import {
 } from 'lucide-react';
 import type { MailMeta } from '../types';
 import { formatAddress, formatDate } from '../utils/format';
-
-export type MailFilter = 'all' | 'unread' | 'read';
+import { applyMailFilter, type MailFilter } from '../utils/mailFilter';
+import { isTypingTarget } from '../utils/dom';
 
 interface MailListProps {
   messages: MailMeta[];
@@ -42,6 +42,8 @@ interface MailListProps {
   onBatchMove: () => void;
   /** 单封邮件标记已读/未读：未选批量或单选时使用 */
   onMarkSeen?: (uid: number, seen: boolean) => void;
+  /** 面板宽度（受外层拖拽控制），不传时回退默认 360px */
+  width?: number;
 }
 
 interface ContextMenuState {
@@ -77,6 +79,7 @@ const MailList: React.FC<MailListProps> = ({
   onBatchDelete,
   onBatchMove,
   onMarkSeen,
+  width,
 }) => {
   const actionBtn =
     'flex items-center gap-1 px-2 py-1 text-xs border border-border rounded-md hover:bg-accent transition-colors disabled:opacity-60';
@@ -85,16 +88,23 @@ const MailList: React.FC<MailListProps> = ({
   const busy = (loading || searching) && messages.length === 0;
 
   const isSearching = searchQuery.trim().length > 0;
-  const visibleMessages = useMemo(() => {
-    if (isSearching) return messages;
-    if (mailFilter === 'unread') return messages.filter((m) => !m.seen);
-    if (mailFilter === 'read') return messages.filter((m) => m.seen);
-    return messages;
-  }, [messages, mailFilter, isSearching]);
+  // 统一过滤口径（与 ToolPanel 的导航计算共享）
+  const visibleMessages = useMemo(
+    () => applyMailFilter(messages, mailFilter, isSearching),
+    [messages, mailFilter, isSearching],
+  );
   const visibleUids = useMemo(() => visibleMessages.map((m) => m.uid), [visibleMessages]);
 
   const unreadCount = useMemo(() => messages.filter((m) => !m.seen).length, [messages]);
   const readCount = messages.length - unreadCount;
+  const attachCount = useMemo(() => messages.filter((m) => m.hasAttachment).length, [messages]);
+
+  // —— 键盘导航（j/k/Enter/Delete/n）：纯前端，仅非多选/非输入聚焦时生效 ——
+  const [activeIndex, setActiveIndex] = useState(-1);
+  // visibleMessages 变化时复位（避免越界）
+  useEffect(() => {
+    setActiveIndex((i) => (i >= visibleMessages.length ? -1 : i));
+  }, [visibleMessages]);
 
   // —— 右键菜单状态 ——
   const hostRef = useRef<HTMLDivElement>(null);
@@ -244,7 +254,42 @@ const MailList: React.FC<MailListProps> = ({
   };
 
   return (
-    <div ref={hostRef} className="relative w-[360px] shrink-0 flex flex-col border-r border-border bg-background" onContextMenu={handleHostContextMenu}>
+    <div
+      ref={hostRef}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (isTypingTarget(e.target)) return;
+        if (selectionMode) return;
+        const n = visibleMessages.length;
+        if (n === 0) return;
+        switch (e.key) {
+          case 'j':
+          case 'ArrowDown':
+            e.preventDefault();
+            setActiveIndex((i) => Math.min(n - 1, i < 0 ? 0 : i + 1));
+            break;
+          case 'k':
+          case 'ArrowUp':
+            e.preventDefault();
+            setActiveIndex((i) => Math.max(0, i < 0 ? 0 : i - 1));
+            break;
+          case 'Enter':
+            if (activeIndex >= 0 && activeIndex < n) onSelect(visibleMessages[activeIndex]);
+            break;
+          case 'Delete':
+          case 'Backspace':
+            if (activeIndex >= 0 && activeIndex < n) onDelete(visibleMessages[activeIndex]);
+            break;
+          case 'n':
+            e.preventDefault();
+            onCompose();
+            break;
+        }
+      }}
+      style={width ? { width } : undefined}
+      className="relative shrink-0 flex flex-col border-r border-border bg-background"
+      onContextMenu={handleHostContextMenu}
+    >
       {/* 工具栏行：多选切换（左）+ 分类筛选（中） + 已选计数（右） */}
       <div className="flex items-center gap-1 px-3 py-2 border-b border-border bg-background shrink-0">
         <button
@@ -261,6 +306,7 @@ const MailList: React.FC<MailListProps> = ({
               {filterBtn('all', '全部', messages.length)}
               {filterBtn('unread', '未读', unreadCount)}
               {filterBtn('read', '已读', readCount)}
+              {filterBtn('attachment', '附件', attachCount)}
             </>
           )}
           {isSearching && (
@@ -314,20 +360,31 @@ const MailList: React.FC<MailListProps> = ({
                 ? '没有未读邮件'
                 : mailFilter === 'read'
                   ? '没有已读邮件'
-                  : '暂无邮件'}
+                  : mailFilter === 'attachment'
+                    ? '没有带附件的邮件'
+                    : '暂无邮件'}
           </div>
         ) : (
-          visibleMessages.map((m) => {
+          visibleMessages.map((m, i) => {
             const checked = selectedUids.has(m.uid);
+            const isActive = activeIndex === i;
             return (
               <div
                 data-mail-row
+                data-mail-index={i}
                 key={`${m.accountId || 'a'}:${m.uid}`}
-                onClick={() => (selectionMode ? onToggleSelect(m.uid) : onSelect(m))}
+                onClick={() => {
+                  if (selectionMode) {
+                    onToggleSelect(m.uid);
+                  } else {
+                    setActiveIndex(i);
+                    onSelect(m);
+                  }
+                }}
                 onContextMenu={(e) => handleRowContextMenu(e, m)}
                 className={`group flex items-start gap-2 px-3 py-2.5 cursor-pointer border-b border-border/60 transition-colors ${
                   m.uid === selectedUid ? 'bg-accent' : 'hover:bg-accent/50'
-                }`}
+                } ${isActive ? 'ring-1 ring-inset ring-primary/60' : ''}`}
               >
                 {selectionMode && (
                   <span className="mt-1 shrink-0 text-muted-foreground">
