@@ -232,7 +232,7 @@ const Compose: React.FC<ComposeProps> = ({
   const labelCls = 'block text-xs text-muted-foreground mb-1';
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-background">
+    <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background">
       <div className="flex items-center justify-between px-5 py-3 border-b border-border">
         <span className="font-semibold text-sm">
           {mode === 'new' ? '写邮件' : mode === 'reply' ? '回复' : '转发'}

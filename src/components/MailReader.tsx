@@ -118,7 +118,7 @@ const MailReader: React.FC<MailReaderProps> = ({
   const showNav = onPrev || onNext;
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-background">
+    <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background">
       <div className="px-5 py-4 border-b border-border">
         <h2 className="text-lg font-semibold mb-3">{detail.subject || '(无主题)'}</h2>
         {/* 邮件头信息：发件人/收件人/抄送/日期 */}
