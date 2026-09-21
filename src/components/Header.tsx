@@ -1,5 +1,6 @@
 import React from 'react';
-import { Plus, RefreshCw, Search, PenLine, Settings, Mail } from 'lucide-react';
+import { Plus, RefreshCw, Search, PenLine, Settings, Mail, Languages, Loader2 } from 'lucide-react';
+import { TRANSLATE_LANGUAGES } from '../services/translateService';
 
 interface HeaderProps {
   searchQuery: string;
@@ -9,6 +10,13 @@ interface HeaderProps {
   onAddAccount: () => void;
   onOpenSettings: () => void;
   searching?: boolean;
+  /** 翻译当前打开邮件 */
+  onTranslate: () => void;
+  translating?: boolean;
+  translateDisabled?: boolean;
+  /** 翻译目标语言代码 */
+  targetLang: string;
+  onTargetLangChange: (lang: string) => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -19,6 +27,11 @@ const Header: React.FC<HeaderProps> = ({
   onAddAccount,
   onOpenSettings,
   searching = false,
+  onTranslate,
+  translating = false,
+  translateDisabled = false,
+  targetLang,
+  onTargetLangChange,
 }) => {
   const iconBtn =
     'p-1.5 rounded-md hover:bg-accent transition-colors disabled:opacity-60 shrink-0';
@@ -52,6 +65,30 @@ const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="flex items-center gap-1 shrink-0">
+        <select
+          value={targetLang}
+          onChange={(e) => onTargetLangChange(e.target.value)}
+          title="翻译目标语言"
+          className="hidden sm:block h-7 max-w-[124px] text-xs px-1.5 rounded-md border border-input bg-background text-foreground focus:outline-none focus:border-primary shrink-0"
+        >
+          {TRANSLATE_LANGUAGES.map((lang) => (
+            <option key={lang.code} value={lang.code}>
+              {lang.label}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={onTranslate}
+          className={iconBtn}
+          title={translateDisabled ? '请先打开一封邮件' : '翻译当前邮件'}
+          disabled={translateDisabled || translating}
+        >
+          {translating ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Languages className="w-4 h-4" />
+          )}
+        </button>
         <button
           onClick={onRefresh}
           className={iconBtn}

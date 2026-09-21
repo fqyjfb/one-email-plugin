@@ -29,6 +29,7 @@ import MoveFolderModal from './components/MoveFolderModal';
 import DraftsModal from './components/DraftsModal';
 import SettingsModal from './components/SettingsModal';
 import { useResizableWidths } from './hooks/useResizableWidths';
+import { useMailTranslation } from './hooks/useMailTranslation';
 
 type ComposeState = {
   mode: ComposeMode;
@@ -157,6 +158,17 @@ const ToolPanel: React.FC = () => {
   const activeDetail = isUnified ? unifiedStore.selectedDetail : mailStore.selectedDetail;
   const activeLoadingDetail = isUnified ? unifiedStore.loadingDetail : mailStore.loadingDetail;
   const activeError = isUnified ? unifiedStore.error : mailStore.error;
+
+  // 当前邮件翻译（目标语言 / 译文缓存 / 译文-原文勾选切换）
+  const {
+    targetLang,
+    setTargetLang,
+    translating,
+    translation,
+    showTranslated,
+    translateCurrent,
+    toggleShowTranslated,
+  } = useMailTranslation(activeDetail, addToast);
 
   // A3 列表过滤口径与 MailList 严格一致，确保「上/下一封」不串序
   const isSearching = activeSearchQuery.trim().length > 0;
@@ -574,6 +586,11 @@ const ToolPanel: React.FC = () => {
         onAddAccount={openAddAccount}
         onOpenSettings={() => setShowSettings(true)}
         searching={activeSearching}
+        onTranslate={translateCurrent}
+        translating={translating}
+        translateDisabled={!activeDetail}
+        targetLang={targetLang}
+        onTargetLangChange={setTargetLang}
       />
 
       {/* 下方三栏布局（左右宽度可拖拽，自动持久化） */}
@@ -706,6 +723,10 @@ const ToolPanel: React.FC = () => {
               onNext={goNext}
               hasPrev={hasPrev}
               hasNext={hasNext}
+              translation={translation}
+              translating={translating}
+              showTranslated={showTranslated}
+              onToggleTranslated={toggleShowTranslated}
             />
           )}
         </div>

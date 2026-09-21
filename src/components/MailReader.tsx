@@ -10,12 +10,14 @@ import {
   ChevronUp,
   ChevronDown,
   Image as ImageIcon,
+  Languages,
 } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import type { AttachmentMeta, MailDetail } from '../types';
 import { formatAddress, formatAddressList, formatFullDate } from '../utils/format';
 import AttachmentBar from './AttachmentBar';
 import { openExternal } from '../services/externalService';
+import type { MailTranslation } from '../hooks/useMailTranslation';
 
 interface MailReaderProps {
   detail: MailDetail | null;
@@ -31,6 +33,12 @@ interface MailReaderProps {
   onNext?: () => void;
   hasPrev?: boolean;
   hasNext?: boolean;
+  /** 当前邮件译文（null = 未翻译） */
+  translation?: MailTranslation | null;
+  translating?: boolean;
+  /** 勾选框状态：true 显示译文替换原文，false 显示原文 */
+  showTranslated?: boolean;
+  onToggleTranslated?: (show: boolean) => void;
 }
 
 /** 邮件正文容器 CSS scope：避免选择器污染主页面其它元素 */
@@ -49,6 +57,10 @@ const MailReader: React.FC<MailReaderProps> = ({
   onNext,
   hasPrev,
   hasNext,
+  translation = null,
+  translating = false,
+  showTranslated = false,
+  onToggleTranslated,
 }) => {
   // A9 远程图片按需加载：默认严格策略，切换邮件复位
   const [showRemote, setShowRemote] = useState(false);
@@ -120,7 +132,9 @@ const MailReader: React.FC<MailReaderProps> = ({
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background">
       <div className="px-5 py-4 border-b border-border">
-        <h2 className="text-lg font-semibold mb-3">{detail.subject || '(无主题)'}</h2>
+        <h2 className="text-lg font-semibold mb-3">
+          {showTranslated && translation?.subject ? translation.subject : detail.subject || '(无主题)'}
+        </h2>
         {/* 邮件头信息：发件人/收件人/抄送/日期 */}
         <div className="text-sm">
           <div className="text-muted-foreground">
@@ -180,6 +194,29 @@ const MailReader: React.FC<MailReaderProps> = ({
             <span>删除</span>
           </button>
         </div>
+        {/* 译文开关：翻译中或已有译文时显示；勾选替换原文，取消恢复原文 */}
+        {(translating || translation) && (
+          <label className="mt-3 inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-muted/50 text-xs text-muted-foreground cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-primary cursor-pointer m-0"
+              checked={showTranslated}
+              disabled={translating || !translation}
+              onChange={(e) => onToggleTranslated?.(e.target.checked)}
+            />
+            {translating ? (
+              <span className="inline-flex items-center gap-1.5 text-foreground">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                正在翻译邮件…
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5">
+                <Languages className="w-3.5 h-3.5" />
+                显示译文（取消勾选恢复原文）
+              </span>
+            )}
+          </label>
+        )}
       </div>
 
       <AttachmentBar attachments={detail.attachments} onDownload={onDownloadAttachment} />
@@ -199,7 +236,13 @@ const MailReader: React.FC<MailReaderProps> = ({
       )}
 
       <div className="flex-1 overflow-auto bg-white dark:bg-gray-900">
-        {cleanHtml ? (
+        {showTranslated && translation ? (
+          <div
+            className={`${CONTENT_CLASS} px-5 py-4 text-sm leading-relaxed text-foreground break-words whitespace-pre-wrap`}
+          >
+            {translation.body || '(无正文)'}
+          </div>
+        ) : cleanHtml ? (
           <div
             ref={contentRef}
             onClick={handleContentClick}
