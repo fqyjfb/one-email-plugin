@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import ReactDOM from 'react-dom/client';
+import './styles/globals.css';
 import ToolPanel from './ToolPanel';
 
 interface ErrorBoundaryProps {
@@ -58,97 +59,7 @@ const PluginApp: React.FC = () => {
   );
 };
 
-function injectTailwindVariables() {
-  const style = document.createElement('style');
-  style.textContent = `
-:root {
-  --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 3.9%;
-  --primary: 240 5.9% 10%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 240 10% 3.9%;
-  --radius: 0.5rem;
-}
-
-.dark {
-  --background: 224 14% 10%;
-  --foreground: 210 40% 98%;
-  --card: 224 14% 12%;
-  --card-foreground: 210 40% 98%;
-  --popover: 224 14% 12%;
-  --popover-foreground: 210 40% 98%;
-  --primary: 210 40% 98%;
-  --primary-foreground: 222 47.4% 11.2%;
-  --secondary: 224 10% 18%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 224 10% 18%;
-  --muted-foreground: 215 20.2% 65.1%;
-  --accent: 224 10% 18%;
-  --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 224 10% 22%;
-  --input: 224 10% 22%;
-  --ring: 224 14% 40%;
-}
-
-.one-email-plugin-root {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-.one-email-plugin-root * {
-  -webkit-tap-highlight-color: transparent;
-}
-
-.one-email-plugin-root ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.one-email-plugin-root ::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.one-email-plugin-root ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border));
-  border-radius: 4px;
-}
-
-.one-email-plugin-root ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground));
-}
-
-/* 隐藏滚动条但保留滚动功能（侧栏邮箱列表等） */
-.one-email-plugin-root .no-scrollbar {
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE / Edge */
-}
-.one-email-plugin-root .no-scrollbar::-webkit-scrollbar {
-  display: none; /* Chrome / Safari / Electron */
-}
-`;
-  document.head.appendChild(style);
-}
-
 function renderStandalone() {
-  injectTailwindVariables();
-
   const root = document.getElementById('root');
   if (!root) {
     console.error('根元素未找到');
@@ -161,8 +72,6 @@ function renderStandalone() {
 }
 
 function registerPlugin(api: any) {
-  injectTailwindVariables();
-
   const { registerTool, registerSidebarButton, openPluginWindow } = api;
 
   registerTool({

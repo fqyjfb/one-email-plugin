@@ -71,7 +71,7 @@ const Modal: React.FC<ModalProps> = ({
             {onConfirm && (
               <button
                 onClick={handleConfirm}
-                className="px-4 py-1.5 text-sm bg-primary text-button-text rounded-md hover:opacity-90 transition-colors"
+                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-colors"
               >
                 {confirmText}
               </button>

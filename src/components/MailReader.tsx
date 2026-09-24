@@ -235,7 +235,7 @@ const MailReader: React.FC<MailReaderProps> = ({
         </div>
       )}
 
-      <div className="flex-1 overflow-auto bg-white dark:bg-gray-900">
+      <div className="flex-1 overflow-auto mail-content-area">
         {showTranslated && translation ? (
           <div
             className={`${CONTENT_CLASS} px-5 py-4 text-sm leading-relaxed text-foreground break-words whitespace-pre-wrap`}

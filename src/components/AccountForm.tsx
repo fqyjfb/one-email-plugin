@@ -416,7 +416,7 @@ const AccountForm: React.FC<AccountFormProps> = ({
             <button
               onClick={oauthLoading ? handleOAuthCancel : handleOAuthLogin}
               disabled={!!oauthToken}
-              className="flex w-full items-center justify-center gap-2 px-3 py-2 text-sm bg-primary text-button-text rounded-md hover:opacity-90 transition-colors disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 px-3 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-colors disabled:opacity-60"
             >
               {oauthLoading ? (
                 <>

@@ -239,14 +239,12 @@ const MailList: React.FC<MailListProps> = ({
     return (
       <button
         onClick={() => onFilterChange(f)}
-        className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-colors ${
-          active
-            ? 'bg-primary text-button-text'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+        className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-colors mail-filter-btn ${
+          active ? 'is-active' : ''
         }`}
       >
         {label}
-        <span className={`min-w-[18px] text-center rounded ${active ? 'bg-button-text/20 px-1' : 'bg-muted px-1'}`}>
+        <span className={`min-w-[18px] text-center rounded mail-filter-btn-badge px-1`}>
           {count}
         </span>
       </button>
