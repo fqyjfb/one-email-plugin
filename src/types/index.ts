@@ -87,6 +87,8 @@ export interface MailDetail {
   attachments: AttachmentMeta[];
   /** 统一收件箱注入：所属账号 id（单账号视图无） */
   accountId?: string;
+  /** 提取到的验证码（主进程 getMessage 可预填；渲染层兜底计算并缓存） */
+  code?: string | null;
 }
 
 /** IMAP 文件夹 */
@@ -129,6 +131,8 @@ export interface PluginSettings {
   defaultSignature?: string;
   pageSize: number;
   oauthClients?: OAuthClientMap;
+  /** 验证码隐私遮蔽：0=始终显示；30/60/300=打开 N 秒后掩码，可手动查看 15 秒 */
+  codeHideSeconds?: number;
 }
 
 export interface PluginConfig {

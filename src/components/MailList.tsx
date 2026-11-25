@@ -11,6 +11,7 @@ import {
   FolderInput,
   X,
   CheckCheck,
+  KeyRound,
 } from 'lucide-react';
 import type { MailMeta } from '../types';
 import { formatAddress, formatDate } from '../utils/format';
@@ -42,6 +43,10 @@ interface MailListProps {
   onBatchMove: () => void;
   /** 单封邮件标记已读/未读：未选批量或单选时使用 */
   onMarkSeen?: (uid: number, seen: boolean) => void;
+  /** 右键「提取验证码」：取正文识别并复制（命中缓存则无网络） */
+  onExtractCode?: (meta: MailMeta) => void;
+  /** 查询某行是否已有已知验证码，用于行内绿色徽标 */
+  getOtpCode?: (meta: MailMeta) => string | undefined;
   /** 面板宽度（受外层拖拽控制），不传时回退默认 360px */
   width?: number;
 }
@@ -79,6 +84,8 @@ const MailList: React.FC<MailListProps> = ({
   onBatchDelete,
   onBatchMove,
   onMarkSeen,
+  onExtractCode,
+  getOtpCode,
   width,
 }) => {
   const actionBtn =
@@ -371,6 +378,7 @@ const MailList: React.FC<MailListProps> = ({
                 data-mail-row
                 data-mail-index={i}
                 key={`${m.accountId || 'a'}:${m.uid}`}
+                style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 76px' }}
                 onClick={() => {
                   if (selectionMode) {
                     onToggleSelect(m.uid);
@@ -403,6 +411,14 @@ const MailList: React.FC<MailListProps> = ({
                   </div>
                   <div className={`text-sm truncate ${m.seen ? 'text-muted-foreground' : 'font-medium'}`}>{m.subject}</div>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    {getOtpCode?.(m) && (
+                      <span
+                        className="rounded bg-green-100 px-1 text-[10px] font-semibold text-green-700 shrink-0"
+                        title={`已识别验证码：${getOtpCode(m)}`}
+                      >
+                        码
+                      </span>
+                    )}
                     {m.hasAttachment && <Paperclip className="w-3 h-3" />}
                     {m.accountEmail && (
                       <span className="truncate rounded bg-muted px-1 text-[10px] text-muted-foreground" title={m.accountEmail}>
@@ -481,6 +497,15 @@ const MailList: React.FC<MailListProps> = ({
             <Mail className="w-3.5 h-3.5" />
             标记未读
           </button>
+          {singleAvailable && onExtractCode && (
+            <button
+              onClick={() => { closeMenu(); onExtractCode(ctxMeta!); }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-accent transition-colors text-left text-green-700"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              提取验证码
+            </button>
+          )}
           {selectionMode && (
             <button
               onClick={() => { closeMenu(); onBatchMove(); }}

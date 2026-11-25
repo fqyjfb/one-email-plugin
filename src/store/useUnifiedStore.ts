@@ -4,12 +4,27 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { AccountMeta, Credential, MailMeta, MailDetail } from '../types';
 import * as emailService from '../services/emailService';
+import { computeDetailCode } from '../services/otpService';
 
 /** 侧边栏「统一收件箱」虚拟入口 id */
 export const UNIFIED_ID = '__unified__';
 
 const INBOX = 'INBOX';
 const PAGE_SIZE = 50;
+
+/** 合并并按 `${accountId}:${uid}` 去重，再按时间倒序。防止重复刷新/竞态产生重复行。 */
+function mergeUnique(list: MailMeta[]): MailMeta[] {
+  const seen = new Set<string>();
+  const out: MailMeta[] = [];
+  for (const m of list) {
+    const k = `${m.accountId ?? ''}:${m.uid}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(m);
+  }
+  out.sort((a, b) => b.date - a.date);
+  return out;
+}
 
 export function useUnifiedStore(
   accounts: AccountMeta[],
@@ -27,6 +42,9 @@ export function useUnifiedStore(
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 请求代次：快速搜索/账号切换/刷新时，旧请求返回后丢弃，避免覆盖新结果
+  const reqGen = useRef(0);
+
   const decryptRef = useRef(decrypt);
   decryptRef.current = decrypt;
 
@@ -37,6 +55,7 @@ export function useUnifiedStore(
   }, [messages]);
 
   const refresh = useCallback(async () => {
+    const gen = ++reqGen.current;
     setLoading(true);
     setError(null);
     const all: MailMeta[] = [];
@@ -54,14 +73,35 @@ export function useUnifiedStore(
         }
       }),
     );
-    all.sort((a, b) => b.date - a.date);
-    setMessages(all);
+    if (gen !== reqGen.current) return; // 账号切换 / 新搜索触发的更新请求已取代本次
+    setMessages(mergeUnique(all));
     setLoading(false);
   }, [accounts]);
+
+  /** 仅刷新指定账号的 INBOX 并合并进当前列表——新邮件事件增量更新，避免全账号重拉。 */
+  const refreshAccount = useCallback(
+    async (accountId: string) => {
+      const acc = accounts.find((a) => a.id === accountId);
+      if (!acc) return;
+      const gen = ++reqGen.current;
+      try {
+        const cred = await decryptRef.current(acc);
+        if (!cred) return;
+        const res = await emailService.listMessages(acc, cred, INBOX, 0, PAGE_SIZE);
+        if (gen !== reqGen.current) return; // 被后续全量刷新 / 搜索取代，丢弃
+        const incoming = res.messages.map((m) => ({ ...m, accountId: acc.id, accountEmail: acc.email }));
+        setMessages((prev) => mergeUnique([...incoming, ...prev]));
+      } catch {
+        // 单账号失败跳过，不阻断整体
+      }
+    },
+    [accounts],
+  );
 
   // 跨账号全文搜索（IMAP SEARCH，每个账号搜一遍后合并）
   const doSearch = useCallback(
     async (query: string) => {
+      const gen = ++reqGen.current;
       setSearching(true);
       setError(null);
       const all: MailMeta[] = [];
@@ -79,8 +119,8 @@ export function useUnifiedStore(
           }
         }),
       );
-      all.sort((a, b) => b.date - a.date);
-      setMessages(all);
+      if (gen !== reqGen.current) return; // 更快的键入 / 清空搜索已发起新请求，丢弃旧结果
+      setMessages(mergeUnique(all));
       setSearching(false);
     },
     [accounts],
@@ -126,7 +166,8 @@ export function useUnifiedStore(
       setError(null);
       try {
         const detail = await emailService.getMessage(acc, cred, INBOX, meta.uid);
-        setSelectedDetail({ ...detail, accountId: acc.id });
+        const code = computeDetailCode(detail, acc.id);
+        setSelectedDetail({ ...detail, accountId: acc.id, code });
         if (!meta.seen) {
           await emailService.setSeen(acc, cred, INBOX, [meta.uid], true);
           setMessages((prev) => prev.map((m) => (m.uid === meta.uid ? { ...m, seen: true } : m)));
@@ -197,6 +238,7 @@ export function useUnifiedStore(
     loadingDetail,
     error,
     refresh,
+    refreshAccount,
     runSearch,
     openMail,
     markSeen,

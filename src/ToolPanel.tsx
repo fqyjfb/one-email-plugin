@@ -30,6 +30,9 @@ import DraftsModal from './components/DraftsModal';
 import SettingsModal from './components/SettingsModal';
 import { useResizableWidths } from './hooks/useResizableWidths';
 import { useMailTranslation } from './hooks/useMailTranslation';
+import { copyToClipboard } from './utils/clipboard';
+import { computeDetailCode, otpKey } from './services/otpService';
+import { getCachedOtp } from './services/otpCache';
 
 type ComposeState = {
   mode: ComposeMode;
@@ -53,6 +56,8 @@ const ToolPanel: React.FC = () => {
     setOAuthClient,
     toasts,
     addToast,
+    settings,
+    updateSettings,
   } = useAccountStore();
 
   const currentAccount = accounts.find((a) => a.id === currentAccountId) || null;
@@ -75,6 +80,9 @@ const ToolPanel: React.FC = () => {
 
   // 移动邮件
   const [moveUids, setMoveUids] = useState<number[] | null>(null);
+
+  // 已识别验证码的行内徽标（key = `${accountId}:${uid}`），驱动 MailList 绿色徽标
+  const [otpBadges, setOtpBadges] = useState<Record<string, string>>({});
 
   // 草稿箱
   const [showDrafts, setShowDrafts] = useState(false);
@@ -115,14 +123,14 @@ const ToolPanel: React.FC = () => {
   useEffect(() => {
     const handler = (payload: { id: string }) => {
       scheduleUnreadRefresh();
-      if (isUnifiedRef.current) void unifiedStore.refresh();
+      if (isUnifiedRef.current) void unifiedStore.refreshAccount(payload.id);
       else if (payload.id === accountIdRef.current) mailStore.refreshList();
     };
     emailService.onNewMail(handler);
     return () => {
       emailService.onNewMail(() => {});
     };
-  }, [scheduleUnreadRefresh, unifiedStore.refresh, mailStore.refreshList]);
+  }, [scheduleUnreadRefresh, unifiedStore.refreshAccount, mailStore.refreshList]);
 
   // 账号切换 → 解密凭据（统一视图无需）
   useEffect(() => {
@@ -158,6 +166,26 @@ const ToolPanel: React.FC = () => {
   const activeDetail = isUnified ? unifiedStore.selectedDetail : mailStore.selectedDetail;
   const activeLoadingDetail = isUnified ? unifiedStore.loadingDetail : mailStore.loadingDetail;
   const activeError = isUnified ? unifiedStore.error : mailStore.error;
+
+  // 记录一封邮件的验证码到行内徽标（同值不触发重渲染）
+  const stampOtpBadge = useCallback((accountId: string | null | undefined, uid: number, code: string) => {
+    if (!code) return;
+    const key = otpKey(accountId, uid);
+    setOtpBadges((prev) => (prev[key] === code ? prev : { ...prev, [key]: code }));
+  }, []);
+
+  // 打开邮件时若已识别到验证码，同步点亮列表行徽标
+  useEffect(() => {
+    if (activeDetail?.code) {
+      stampOtpBadge(activeDetail.accountId ?? currentAccountId, activeDetail.uid, activeDetail.code);
+    }
+  }, [activeDetail, currentAccountId, stampOtpBadge]);
+
+  // MailList 查询某行是否已有已知验证码（行内绿色徽标）
+  const getOtpCode = useCallback(
+    (meta: MailMeta): string | undefined => otpBadges[otpKey(meta.accountId ?? currentAccountId, meta.uid)],
+    [otpBadges, currentAccountId],
+  );
 
   // 当前邮件翻译（目标语言 / 译文缓存 / 译文-原文勾选切换）
   const {
@@ -332,6 +360,57 @@ const ToolPanel: React.FC = () => {
       }
     },
     [isUnified, unifiedStore.selectedDetail, accounts, decryptCredential, currentAccount, credential, mailStore.selectedDetail, mailStore.currentFolder, addToast],
+  );
+
+  // —— 验证码：阅读区复制 ——
+  const handleCopyCode = useCallback(
+    async (code: string) => {
+      const ok = await copyToClipboard(code);
+      addToast(ok ? `已复制验证码：${code}` : '复制失败，请手动复制', ok ? 'success' : 'error');
+    },
+    [addToast],
+  );
+
+  // —— 验证码：列表右键「提取验证码」——
+  // 优先读缓存；未命中则取正文实时提取（命中主进程正文缓存时无网络开销）。
+  const handleExtractCode = useCallback(
+    async (meta: MailMeta) => {
+      const accountId = meta.accountId ?? currentAccountId ?? null;
+      const key = otpKey(accountId, meta.uid);
+      const cached = getCachedOtp(key);
+      if (cached) {
+        const ok = await copyToClipboard(cached);
+        addToast(ok ? `已复制验证码：${cached}` : '复制失败，请手动复制', ok ? 'success' : 'error');
+        return;
+      }
+      let acc: AccountMeta | null = null;
+      let cred: Credential | null = null;
+      let folder = 'INBOX';
+      if (isUnified) {
+        acc = accounts.find((a) => a.id === meta.accountId) ?? null;
+        if (!acc) { addToast('找不到对应账号', 'error'); return; }
+        cred = await decryptCredential(acc);
+      } else {
+        acc = currentAccount;
+        cred = credential;
+        folder = mailStore.currentFolder;
+      }
+      if (!acc || !cred) { addToast('凭据不可用，请重新选择账号', 'error'); return; }
+      try {
+        const detail = await emailService.getMessage(acc, cred, folder, meta.uid);
+        const code = computeDetailCode(detail, acc.id);
+        if (code) {
+          stampOtpBadge(acc.id, meta.uid, code);
+          const ok = await copyToClipboard(code);
+          addToast(ok ? `已复制验证码：${code}` : `验证码：${code}（复制失败，请手动复制）`, ok ? 'success' : 'info');
+        } else {
+          addToast('未识别到验证码', 'info');
+        }
+      } catch (e) {
+        addToast((e as Error).message, 'error');
+      }
+    },
+    [isUnified, accounts, currentAccount, currentAccountId, credential, decryptCredential, mailStore.currentFolder, addToast, stampOtpBadge],
   );
 
   // —— 多选 / 批量（仅单账号视图） ——
@@ -654,6 +733,8 @@ const ToolPanel: React.FC = () => {
           onBatchDelete={handleBatchDelete}
           onBatchMove={handleBatchMove}
           onMarkSeen={handleSingleMarkSeen}
+          onExtractCode={handleExtractCode}
+          getOtpCode={getOtpCode}
           width={widths.maillist}
         />
 
@@ -727,6 +808,8 @@ const ToolPanel: React.FC = () => {
               translating={translating}
               showTranslated={showTranslated}
               onToggleTranslated={toggleShowTranslated}
+              onCopyCode={handleCopyCode}
+              codeHideSeconds={settings?.codeHideSeconds ?? 0}
             />
           )}
         </div>
@@ -745,6 +828,8 @@ const ToolPanel: React.FC = () => {
         onClose={() => setShowSettings(false)}
         oauthClients={oauthClients}
         onSaveOAuthClient={setOAuthClient}
+        codeHideSeconds={settings?.codeHideSeconds ?? 0}
+        onUpdateSettings={updateSettings}
       />
 
       <Modal

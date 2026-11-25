@@ -10,6 +10,7 @@ const CONFIG_VERSION = '1.0.0';
 const DEFAULT_SETTINGS: PluginSettings = {
   defaultSignature: '',
   pageSize: 50,
+  codeHideSeconds: 0,
 };
 
 function getPluginContext() {
@@ -28,6 +29,7 @@ function migrateConfig(config: PluginConfig): PluginConfig {
   if (!config.accounts) config.accounts = [];
   if (!config.settings) config.settings = { ...DEFAULT_SETTINGS };
   if (config.settings.pageSize === undefined) config.settings.pageSize = DEFAULT_SETTINGS.pageSize;
+  if (config.settings.codeHideSeconds === undefined) config.settings.codeHideSeconds = DEFAULT_SETTINGS.codeHideSeconds;
   if (!config.settings.oauthClients) config.settings.oauthClients = {};
   if (config.version !== CONFIG_VERSION) config.version = CONFIG_VERSION;
   return config;

@@ -4,6 +4,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { AccountMeta, Credential, Folder, MailMeta, MailDetail } from '../types';
 import * as emailService from '../services/emailService';
+import { computeDetailCode } from '../services/otpService';
 import { DEFAULT_DELIMITER, isSameOrSubPath } from '../utils/folderTree';
 
 const INBOX = 'INBOX';
@@ -31,6 +32,8 @@ export function useMailStore(
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const searchTimer = useRef<number | null>(null);
+  // 请求代次：文件夹切换 / 快速搜索时旧请求返回后丢弃，避免覆盖或串台
+  const reqGen = useRef(0);
 
   // messages 同步镜像，供 markSeen/batchMarkSeen/deleteMails/moveMails
   // 等操作读取"本次操作前的 seen 状态"——避免 callback 闭包里 messages 过期
@@ -57,19 +60,22 @@ export function useMailStore(
   const loadMessages = useCallback(
     async (folder: string, reset: boolean) => {
       if (!account || !credential) return;
+      const gen = ++reqGen.current;
       setLoadingList(true);
       setError(null);
       try {
         const nextOffset = reset ? 0 : offset;
         const res = await emailService.listMessages(account, credential, folder, nextOffset, PAGE_SIZE);
+        if (gen !== reqGen.current) return; // 文件夹切换 / 新搜索已取代本次
         setMessages((prev) => (reset ? res.messages : [...prev, ...res.messages]));
         setTotal(res.total);
         setHasMore(res.hasMore);
         setOffset(nextOffset + res.messages.length);
       } catch (e) {
+        if (gen !== reqGen.current) return;
         setError((e as Error).message);
       } finally {
-        setLoadingList(false);
+        if (gen === reqGen.current) setLoadingList(false);
       }
     },
     [account, credential, offset],
@@ -78,17 +84,20 @@ export function useMailStore(
   const doSearch = useCallback(
     async (query: string) => {
       if (!account || !credential) return;
+      const gen = ++reqGen.current;
       setSearching(true);
       setError(null);
       try {
         const res = await emailService.searchMessages(account, credential, currentFolder, query, PAGE_SIZE);
+        if (gen !== reqGen.current) return; // 更快的键入 / 清空 / 切换已发起新请求
         setMessages(res.messages);
         setTotal(res.total);
         setHasMore(false);
       } catch (e) {
+        if (gen !== reqGen.current) return;
         setError((e as Error).message);
       } finally {
-        setSearching(false);
+        if (gen === reqGen.current) setSearching(false);
       }
     },
     [account, credential, currentFolder],
@@ -278,7 +287,8 @@ export function useMailStore(
       setError(null);
       try {
         const detail = await emailService.getMessage(account, credential, currentFolder, meta.uid);
-        setSelectedDetail(detail);
+        const code = computeDetailCode(detail, accountId);
+        setSelectedDetail({ ...detail, code });
         if (!meta.seen) {
           await emailService.setSeen(account, credential, currentFolder, [meta.uid], true);
           setMessages((prev) => prev.map((m) => (m.uid === meta.uid ? { ...m, seen: true } : m)));

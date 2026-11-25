@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Save, X } from 'lucide-react';
-import type { OAuthClientConfig, OAuthClientMap } from '../types';
+import { Save, X, EyeOff } from 'lucide-react';
+import type { OAuthClientConfig, OAuthClientMap, PluginSettings } from '../types';
 import Modal from './Modal';
 
 interface SettingsModalProps {
@@ -8,6 +8,10 @@ interface SettingsModalProps {
   onClose: () => void;
   oauthClients: OAuthClientMap;
   onSaveOAuthClient: (provider: 'gmail' | 'outlook', cfg: OAuthClientConfig | null) => Promise<void>;
+  /** 验证码隐私遮蔽时长（0=始终显示） */
+  codeHideSeconds: number;
+  /** 更新全局设置（含 codeHideSeconds） */
+  onUpdateSettings: (patch: Partial<PluginSettings>) => Promise<void>;
 }
 
 interface ProviderFormState {
@@ -25,6 +29,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   oauthClients,
   onSaveOAuthClient,
+  codeHideSeconds,
+  onUpdateSettings,
 }) => {
   const [forms, setForms] = useState<Record<'gmail' | 'outlook', ProviderFormState>>({
     gmail: { clientId: '', clientSecret: '' },
@@ -32,6 +38,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   });
   const [saving, setSaving] = useState<'gmail' | 'outlook' | null>(null);
   const [savedHint, setSavedHint] = useState<string | null>(null);
+  const [privacyHint, setPrivacyHint] = useState(false);
+
+  const handleHideSecondsChange = async (value: number) => {
+    await onUpdateSettings({ codeHideSeconds: value });
+    setPrivacyHint(true);
+    window.setTimeout(() => setPrivacyHint(false), 1500);
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -76,6 +89,28 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="设置" size="lg" cancelText="关闭" onCancel={onClose}>
       <div className="space-y-5">
+        <div>
+          <h4 className="text-sm font-semibold mb-1 flex items-center gap-1.5">
+            <EyeOff className="w-4 h-4" /> 验证码隐私遮蔽
+          </h4>
+          <p className="text-xs text-muted-foreground mb-2">
+            识别到验证码的邮件，打开超过设定时长后自动掩码（••••••），可点击临时查看 15 秒。仅影响展示，不声明验证码失效。
+          </p>
+          <div className="flex items-center gap-2">
+            <select
+              value={codeHideSeconds}
+              onChange={(e) => void handleHideSecondsChange(Number(e.target.value))}
+              className="px-2.5 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value={0}>始终显示</option>
+              <option value={30}>30 秒</option>
+              <option value={60}>60 秒</option>
+              <option value={300}>5 分钟</option>
+            </select>
+            {privacyHint && <span className="text-xs text-green-600 dark:text-green-400">已保存</span>}
+          </div>
+        </div>
+
         <div>
           <h4 className="text-sm font-semibold mb-1">全局 OAuth 自有客户端配置</h4>
           <p className="text-xs text-muted-foreground mb-3">

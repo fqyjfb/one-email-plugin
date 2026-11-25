@@ -2,7 +2,7 @@
 // 参考 favorite-plugin/src/store/useBookmarkStore.ts 的 hook 范式
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { AccountMeta, Credential, OAuthClientConfig, OAuthClientMap, PluginConfig, ToastMessage } from '../types';
+import type { AccountMeta, Credential, OAuthClientConfig, OAuthClientMap, PluginConfig, PluginSettings, ToastMessage } from '../types';
 import { loadConfig, saveConfig } from '../services/storageService';
 import { generateAccountId } from '../utils/id';
 import { cryptoService } from '../services/cryptoService';
@@ -152,6 +152,16 @@ export function useAccountStore() {
     [oauthClients],
   );
 
+  /** 更新全局设置（持久化），如 codeHideSeconds */
+  const updateSettings = useCallback(
+    async (patch: Partial<PluginSettings>) => {
+      if (!config) return;
+      await persist({ ...config, settings: { ...config.settings, ...patch } });
+      addToast('设置已更新', 'success');
+    },
+    [config, persist, addToast],
+  );
+
   return {
     config,
     settings,
@@ -167,6 +177,7 @@ export function useAccountStore() {
     oauthClients,
     setOAuthClient,
     getOAuthClient,
+    updateSettings,
     toasts,
     addToast,
   };
